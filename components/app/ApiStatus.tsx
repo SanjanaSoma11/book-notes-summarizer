@@ -26,9 +26,7 @@ export function ApiStatus() {
     }
   };
 
-  useEffect(() => {
-    check();
-  }, []);
+  useEffect(() => { check(); }, []);
 
   if (checking) {
     return (
@@ -45,16 +43,8 @@ export function ApiStatus() {
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400">
         <Wifi className="w-3 h-3" />
-        <span>
-          Groq connected{" "}
-          <span className="font-mono opacity-70">
-            · {health.model || "llama-3.3-70b"}
-          </span>
-        </span>
-        <button
-          onClick={check}
-          className="ml-auto hover:text-emerald-300 transition-colors"
-        >
+        <span>Groq connected <span className="font-mono opacity-70">· {health.model || "gemini-2.0-flash"}</span></span>
+        <button onClick={check} className="ml-auto hover:text-emerald-300 transition-colors">
           <RefreshCw className="w-3 h-3" />
         </button>
       </div>
@@ -66,38 +56,16 @@ export function ApiStatus() {
       <div className="flex items-center gap-2">
         <WifiOff className="w-3 h-3 shrink-0" />
         <span className="font-medium">Groq not connected</span>
-        <button
-          onClick={check}
-          className="ml-auto hover:text-red-300 transition-colors"
-        >
+        <button onClick={check} className="ml-auto hover:text-red-300 transition-colors">
           <RefreshCw className="w-3 h-3" />
         </button>
       </div>
       <p className="text-red-400/80 leading-relaxed">{health.error}</p>
       <div className="pt-1 border-t border-red-500/10 text-red-400/60 space-y-1">
-        <p className="font-medium text-red-400/80">Quick fix:</p>
-        <p>
-          1. Get a free key at{" "}
-          <a
-            href="https://console.groq.com/keys"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline inline-flex items-center gap-0.5"
-          >
-            console.groq.com/keys <ExternalLink className="w-2.5 h-2.5" />
-          </a>
-        </p>
-        <p>
-          2. Add to{" "}
-          <span className="font-mono bg-red-500/10 px-1 rounded">
-            .env.local
-          </span>
-          :{" "}
-          <span className="font-mono bg-red-500/10 px-1 rounded">
-            GROQ_API_KEY=gsk_your_key
-          </span>
-        </p>
-        <p>3. Restart the dev server</p>
+        {/* <p className="font-medium text-red-400/80">Quick fix:</p>
+        <p>1. Get a free API key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="underline inline-flex items-center gap-0.5">aistudio.google.com/apikey <ExternalLink className="w-2.5 h-2.5" /></a></p>
+        <p>2. Add it to <span className="font-mono bg-red-500/10 px-1 rounded">.env.local</span> as <span className="font-mono bg-red-500/10 px-1 rounded">GEMINI_API_KEY=your-key</span></p>
+        <p>3. Restart the dev server</p> */}
       </div>
     </div>
   );

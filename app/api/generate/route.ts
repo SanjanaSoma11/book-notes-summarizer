@@ -1,135 +1,88 @@
 import { NextRequest, NextResponse } from "next/server";
 import { normalizeNotes, formatHighlightsForPrompt } from "@/lib/normalizer";
-import {
-  validateOutput,
-  validateCitations,
-  computeMetrics,
-  MODES,
-  type Mode,
-} from "@/lib/schema";
-import {
-  SYSTEM_PROMPT,
-  buildUserPrompt,
-  buildRepairPrompt,
-} from "@/lib/prompts";
+import { validateOutput, validateCitations, computeMetrics, MODES, type Mode } from "@/lib/schema";
+import { buildSystemPrompt, buildUserPrompt, buildRepairPrompt } from "@/lib/prompts";
 import { generateJSON } from "@/lib/groq";
+import { retrieveEvidence } from "@/lib/retrieval";
 
+export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// Mode-specific temperatures
+const MODE_TEMPS: Record<Mode, Record<string, number>> = {
+  oneMinute:  { strict: 0.25, balanced: 0.35 },
+  technical:  { strict: 0.2,  balanced: 0.3  },
+  kidFriendly:{ strict: 0.35, balanced: 0.45 },
+  interview:  { strict: 0.2,  balanced: 0.3  },
+};
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { mode, notesText } = body as { mode: string; notesText: string };
+    const { mode, notesText, useRAG = true, strictness = "strict" } = body as {
+      mode: string; notesText: string; useRAG?: boolean; strictness?: "strict" | "balanced";
+    };
 
-    // ── Input validation ─────────────────────────
-    if (!mode || !MODES.includes(mode as Mode)) {
-      return NextResponse.json(
-        { error: `Invalid mode. Choose one of: ${MODES.join(", ")}` },
-        { status: 400 },
-      );
-    }
-    if (!notesText || notesText.trim().length < 10) {
-      return NextResponse.json(
-        { error: "Please provide at least 10 characters of notes." },
-        { status: 400 },
-      );
+    if (!mode || !MODES.includes(mode as Mode))
+      return NextResponse.json({ error: `Invalid mode. Choose: ${MODES.join(", ")}` }, { status: 400 });
+    if (!notesText || notesText.trim().length < 10)
+      return NextResponse.json({ error: "Provide at least 10 characters of notes." }, { status: 400 });
+
+    // Step 1: Normalize
+    const allHighlights = normalizeNotes(notesText);
+    if (allHighlights.length === 0)
+      return NextResponse.json({ error: "No highlights extracted." }, { status: 400 });
+
+    // Step 2: RAG retrieval
+    let highlights = allHighlights;
+    let retrievalInfo = null;
+    if (useRAG && allHighlights.length > 6) {
+      try {
+        const r = await retrieveEvidence(allHighlights, mode as Mode);
+        highlights = r.evidenceSet;
+        retrievalInfo = { totalHighlights: r.totalHighlights, retrievedCount: r.retrievedCount, queries: r.queries };
+      } catch { highlights = allHighlights; }
     }
 
-    // ── Step 1: Normalize ────────────────────────
-    const highlights = normalizeNotes(notesText);
-    if (highlights.length === 0) {
-      return NextResponse.json(
-        { error: "Could not extract any highlights from your notes." },
-        { status: 400 },
-      );
-    }
     const hlBlock = formatHighlightsForPrompt(highlights);
-
-    // ── Step 2: Generate with Groq ───────────────
+    const sysPrompt = buildSystemPrompt(strictness as "strict" | "balanced");
     const userPrompt = buildUserPrompt(mode as Mode, hlBlock);
-    let result = await generateJSON(SYSTEM_PROMPT, userPrompt);
+    const temp = MODE_TEMPS[mode as Mode][strictness] ?? 0.3;
 
+    // Step 3: Generate
+    let result = await generateJSON(sysPrompt, userPrompt, temp);
     if (!result.parsed) {
-      const repairPrompt = buildRepairPrompt(
-        result.raw,
-        ["Response was not valid JSON. Return ONLY a JSON object."],
-        hlBlock,
-      );
-      result = await generateJSON(SYSTEM_PROMPT, repairPrompt);
+      result = await generateJSON(sysPrompt, buildRepairPrompt(result.raw, ["Not valid JSON."], hlBlock), temp);
     }
 
-    // ── Step 3: Validate ─────────────────────────
+    // Step 4: Validate
     let validation = validateOutput(result.parsed);
     let citCheck = validation.success
       ? validateCitations(validation.data!, highlights)
       : { valid: false, missing: [] as string[] };
 
-    // ── Step 4: Repair (one retry) ───────────────
+    // Step 5: Repair
     if (!validation.success || !citCheck.valid) {
-      const allErrors = [
-        ...(validation.errors ?? []),
-        ...citCheck.missing.map(
-          (id) => `Citation ${id} does not exist in highlights`,
-        ),
-      ];
-
-      const repairPrompt = buildRepairPrompt(result.raw, allErrors, hlBlock);
-      result = await generateJSON(SYSTEM_PROMPT, repairPrompt);
+      const errs = [...(validation.errors ?? []), ...citCheck.missing.map((id) => `Citation ${id} doesn't exist`)];
+      result = await generateJSON(sysPrompt, buildRepairPrompt(result.raw, errs, hlBlock), temp);
       validation = validateOutput(result.parsed);
-
-      if (validation.success) {
-        citCheck = validateCitations(validation.data!, highlights);
-      }
+      if (validation.success) citCheck = validateCitations(validation.data!, highlights);
     }
 
-    // ── Step 5: Final check ──────────────────────
-    if (!validation.success) {
-      return NextResponse.json(
-        {
-          error: "Generation failed validation even after repair attempt.",
-          details: validation.errors,
-          raw: result.raw,
-        },
-        { status: 422 },
-      );
-    }
+    if (!validation.success)
+      return NextResponse.json({ error: "Validation failed after repair.", details: validation.errors, raw: result.raw }, { status: 422 });
 
-    // ── Step 6: Metrics + response ───────────────
     const metrics = computeMetrics(validation.data!, highlights);
 
     return NextResponse.json({
-      mode: validation.data!.mode,
-      items: validation.data!.items,
-      warnings: validation.data!.warnings ?? [],
-      highlights,
-      metrics,
-      timestamp: new Date().toISOString(),
+      mode: validation.data!.mode, items: validation.data!.items,
+      warnings: validation.data!.warnings ?? [], highlights, allHighlights,
+      metrics, retrieval: retrievalInfo, timestamp: new Date().toISOString(),
     });
   } catch (err: unknown) {
-    console.error("[/api/generate]", err);
     const msg = err instanceof Error ? err.message : "Internal server error";
-
-    if (msg.includes("GROQ_API_KEY")) {
-      return NextResponse.json(
-        {
-          error: "Groq API key not configured.",
-          help: "Get a free key at https://console.groq.com/keys and add it as GROQ_API_KEY in your .env.local",
-        },
-        { status: 401 },
-      );
-    }
-
-    if (msg.includes("RATE_LIMIT") || msg.includes("429")) {
-      return NextResponse.json(
-        {
-          error:
-            "Groq rate limit reached. Free tier: 30 req/min, 1000 req/day.",
-          help: "Wait a moment and try again.",
-        },
-        { status: 429 },
-      );
-    }
-
+    if (msg.includes("GROQ_API_KEY")) return NextResponse.json({ error: "Groq key not set.", help: "https://console.groq.com/keys" }, { status: 401 });
+    if (msg.includes("RATE_LIMIT") || msg.includes("429")) return NextResponse.json({ error: "Rate limit reached.", help: "Wait and retry." }, { status: 429 });
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

@@ -1,12 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
-import { CheckCircle2, Copy, Download, AlertTriangle, FileText, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { CheckCircle2, Copy, AlertTriangle, FileText, ChevronRight, Tag } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { MODE_META, type OutputItem, type Highlight, type RunMetrics, type Mode } from "@/lib/schema";
 import { highlightMap } from "@/lib/normalizer";
-import { toMarkdown } from "@/lib/utils";
+import { ExportMenu } from "@/components/app/ExportMenu";
 
 interface ResultData {
   mode: Mode;
@@ -18,9 +17,11 @@ interface ResultData {
 interface Props {
   result: ResultData | null;
   highlights: Highlight[];
+  strictness?: "strict" | "balanced";
+  onCitationClick?: (id: string) => void;
 }
 
-export function OutputPanel({ result, highlights }: Props) {
+export function OutputPanel({ result, highlights, strictness = "strict", onCitationClick }: Props) {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [citationId, setCitationId] = useState<string | null>(null);
   const hlMap = highlightMap(highlights);
@@ -31,15 +32,9 @@ export function OutputPanel({ result, highlights }: Props) {
     setTimeout(() => setCopiedIdx(null), 1500);
   };
 
-  const downloadMd = () => {
-    if (!result) return;
-    const md = toMarkdown("Book Notes Summary", MODE_META[result.mode].label, result.items, highlights);
-    const blob = new Blob([md], { type: "text/markdown" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `summary-${result.mode}.md`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  const handleCitationClick = (id: string) => {
+    setCitationId(id);
+    onCitationClick?.(id);
   };
 
   if (!result) {
@@ -57,6 +52,7 @@ export function OutputPanel({ result, highlights }: Props) {
 
   return (
     <div className="flex flex-col h-full gap-3">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/10">
@@ -65,13 +61,16 @@ export function OutputPanel({ result, highlights }: Props) {
           <span className="text-sm font-semibold tracking-tight">
             {MODE_META[result.mode].icon} {MODE_META[result.mode].label}
           </span>
+          {strictness === "balanced" && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-medium">
+              Balanced
+            </span>
+          )}
         </div>
-        <Button variant="ghost" size="sm" onClick={downloadMd} className="text-xs gap-1.5 h-7 text-muted-foreground hover:text-foreground">
-          <Download className="w-3 h-3" />
-          Export .md
-        </Button>
+        <ExportMenu result={result} highlights={highlights} />
       </div>
 
+      {/* Warnings */}
       {result.warnings.length > 0 && (
         <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1">
           {result.warnings.map((w, i) => (
@@ -82,6 +81,7 @@ export function OutputPanel({ result, highlights }: Props) {
         </div>
       )}
 
+      {/* Items */}
       <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
         {result.items.map((item, idx) => (
           <div key={idx} className="group p-4 rounded-xl bg-card/60 border border-border/30 hover:border-border/60 transition-all animate-fade-up" style={{ animationDelay: `${idx * 70}ms` }}>
@@ -98,7 +98,7 @@ export function OutputPanel({ result, highlights }: Props) {
             </div>
             <div className="flex flex-wrap gap-1.5 mt-2">
               {item.citations.map((c) => (
-                <button key={c} onClick={() => setCitationId(c)} className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-primary/[0.07] text-primary text-[10px] font-mono font-medium hover:bg-primary/15 transition-colors">
+                <button key={c} onClick={() => handleCitationClick(c)} className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-primary/[0.07] text-primary text-[10px] font-mono font-medium hover:bg-primary/15 transition-colors">
                   {c}<ChevronRight className="w-2.5 h-2.5 opacity-50" />
                 </button>
               ))}
@@ -107,12 +107,14 @@ export function OutputPanel({ result, highlights }: Props) {
         ))}
       </div>
 
+      {/* Metrics bar */}
       <div className="flex items-center gap-5 pt-3 border-t border-border/30 text-xs text-muted-foreground">
         <Pill label="Words" value={result.metrics.wordCount} ok={result.metrics.wordLimitPass} />
         <Pill label="Coverage" value={`${result.metrics.citationCoverage}%`} ok={result.metrics.citationCoverage > 30} />
         <Pill label="Schema" value={result.metrics.schemaPass ? "Pass" : "Fail"} ok={result.metrics.schemaPass} />
       </div>
 
+      {/* Citation dialog */}
       <Dialog open={!!citationId} onOpenChange={() => setCitationId(null)}>
         <DialogContent>
           <DialogHeader>
