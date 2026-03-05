@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef } from "react";
-import { Zap, Loader2, BookOpenCheck, BarChart3, Database, LayoutGrid } from "lucide-react";
+import { Zap, Loader2, BookOpenCheck, BarChart3, Database, LayoutGrid, FileUp } from "lucide-react";
 
 import { normalizeNotes } from "@/lib/normalizer";
 import { MODES, type Mode, type Highlight, type OutputItem, type RunMetrics } from "@/lib/schema";
@@ -17,6 +17,7 @@ import { NoteSetManager } from "@/components/app/NoteSetManager";
 import { EvalDashboard } from "@/components/app/EvalDashboard";
 import { ComparisonView } from "@/components/app/ComparisonView";
 import { StrictnessToggle, type StrictnessLevel } from "@/components/app/StrictnessToggle";
+import { PdfViewer } from "@/components/app/PdfViewer";
 
 interface ResultData {
   mode: Mode;
@@ -44,6 +45,7 @@ export default function Home() {
   const [showComparison, setShowComparison] = useState(false);
   const [strictness, setStrictness] = useState<StrictnessLevel>("strict");
   const [generateAll, setGenerateAll] = useState(false);
+  const [showPdf, setShowPdf] = useState(false);
   const [activeCitation, setActiveCitation] = useState<string | null>(null);
 
   const rawInputRef = useRef(rawInput);
@@ -52,10 +54,7 @@ export default function Home() {
   React.useEffect(() => {
     if (rateLimitCountdown <= 0) return;
     const timer = setInterval(() => {
-      setRateLimitCountdown((prev) => {
-        if (prev <= 1) { setError(null); return 0; }
-        return prev - 1;
-      });
+      setRateLimitCountdown((prev) => { if (prev <= 1) { setError(null); return 0; } return prev - 1; });
     }, 1000);
     return () => clearInterval(timer);
   }, [rateLimitCountdown]);
@@ -66,19 +65,15 @@ export default function Home() {
     if (!text.trim()) {
       setResult(null);
       setAllResults({ oneMinute: null, technical: null, kidFriendly: null, interview: null });
-      setCompletedModes(new Set());
-      setRetrievalInfo(null);
-      setError(null);
+      setCompletedModes(new Set()); setRetrievalInfo(null); setError(null);
     }
   }, []);
 
   const handleLoadNoteSet = (ns: SavedNoteSet) => {
-    setRawInput(ns.rawText);
-    setHighlights(ns.highlights);
-    setActiveNoteSetId(ns.id);
+    setRawInput(ns.rawText); setHighlights(ns.highlights); setActiveNoteSetId(ns.id);
     if (ns.runs.length > 0) {
-      const lastRun = ns.runs[ns.runs.length - 1];
-      setResult({ mode: lastRun.mode, items: lastRun.items, warnings: lastRun.warnings, metrics: lastRun.metrics });
+      const last = ns.runs[ns.runs.length - 1];
+      setResult({ mode: last.mode, items: last.items, warnings: last.warnings, metrics: last.metrics });
       setCompletedModes(new Set(ns.runs.map((r) => r.mode)));
       const restored: Record<Mode, ResultData | null> = { oneMinute: null, technical: null, kidFriendly: null, interview: null };
       ns.runs.forEach((r) => { restored[r.mode] = { mode: r.mode, items: r.items, warnings: r.warnings, metrics: r.metrics }; });
@@ -86,13 +81,18 @@ export default function Home() {
     }
   };
 
+  // PDF text goes straight into notes
+  const handlePdfText = useCallback((text: string) => {
+    setRawInput(text);
+    setHighlights(normalizeNotes(text));
+  }, []);
+
   const generateOne = async (mode: Mode): Promise<ResultData | null> => {
     const currentInput = rawInputRef.current;
-    if (!currentInput.trim()) { setError("No notes to generate from. Paste some text first."); return null; }
+    if (!currentInput.trim()) { setError("No notes to generate from. Paste text or upload a PDF."); return null; }
     try {
       const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode, notesText: currentInput, useRAG, strictness }),
       });
       const data = await res.json();
@@ -109,17 +109,17 @@ export default function Home() {
 
   const handleGenerate = async () => {
     const currentInput = rawInputRef.current;
-    if (!currentInput.trim() || normalizeNotes(currentInput).length === 0) { setError("No notes to generate from. Paste some text first."); return; }
+    if (!currentInput.trim() || normalizeNotes(currentInput).length === 0) { setError("No notes to generate from. Paste text or upload a PDF."); return; }
     setLoading(true); setError(null); setRetrievalInfo(null);
     if (generateAll) {
       for (const mode of MODES) {
         const rd = await generateOne(mode);
-        if (rd) { setAllResults((prev) => ({ ...prev, [mode]: rd })); setCompletedModes((prev) => new Set([...prev, mode])); if (mode === activeMode) setResult(rd); }
+        if (rd) { setAllResults((p) => ({ ...p, [mode]: rd })); setCompletedModes((p) => new Set([...p, mode])); if (mode === activeMode) setResult(rd); }
         if (rateLimitCountdown > 0) break;
       }
     } else {
       const rd = await generateOne(activeMode);
-      if (rd) { setResult(rd); setAllResults((prev) => ({ ...prev, [activeMode]: rd })); setCompletedModes((prev) => new Set([...prev, activeMode])); }
+      if (rd) { setResult(rd); setAllResults((p) => ({ ...p, [activeMode]: rd })); setCompletedModes((p) => new Set([...p, activeMode])); }
     }
     setLoading(false);
   };
@@ -149,7 +149,8 @@ export default function Home() {
       </header>
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-5">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 h-[calc(100vh-8rem)]">
+        <div className={`grid gap-5 h-[calc(100vh-8rem)] ${showPdf ? "grid-cols-1 lg:grid-cols-3" : "grid-cols-1 lg:grid-cols-2"}`}>
+          {/* Left: Input */}
           <div className="flex flex-col gap-3 min-h-0">
             <ApiStatus />
             <div className="flex-1 min-h-0"><NotesPanel value={rawInput} onChange={handleNotesChange} highlightCount={highlights.length} /></div>
@@ -164,6 +165,9 @@ export default function Home() {
               <button onClick={() => setGenerateAll(!generateAll)} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all ${generateAll ? "bg-primary/10 text-primary border border-primary/20" : "bg-muted/40 text-muted-foreground"}`}>
                 <LayoutGrid className="w-3 h-3" /> All modes
               </button>
+              <button onClick={() => setShowPdf(!showPdf)} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all ${showPdf ? "bg-primary/10 text-primary border border-primary/20" : "bg-muted/40 text-muted-foreground"}`}>
+                <FileUp className="w-3 h-3" /> PDF
+              </button>
               {retrievalInfo && <span className="text-[10px] text-muted-foreground ml-auto">{retrievalInfo.retrievedCount}/{retrievalInfo.totalHighlights} retrieved</span>}
             </div>
             <Button variant="glow" size="lg" className="w-full h-12 text-sm font-semibold gap-2 rounded-xl" disabled={!canGenerate} onClick={handleGenerate}>
@@ -171,6 +175,15 @@ export default function Home() {
             </Button>
             {error && <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400 whitespace-pre-wrap">{error}</div>}
           </div>
+
+          {/* Middle: PDF */}
+          {showPdf && (
+            <div className="min-h-0">
+              <PdfViewer onExtractedText={handlePdfText} highlights={highlights} activeCitation={activeCitation} />
+            </div>
+          )}
+
+          {/* Right: Output */}
           <div className="min-h-0 overflow-hidden rounded-2xl border border-border/30 bg-card/40 p-5 border-glow">
             <OutputPanel result={result} highlights={highlights} strictness={strictness} onCitationClick={setActiveCitation} />
           </div>

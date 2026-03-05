@@ -80,10 +80,10 @@ export function ExportMenu({ result, highlights }: Props) {
       <Button variant="ghost" size="sm" onClick={exportMarkdown} className="text-xs gap-1.5 h-7 text-muted-foreground hover:text-foreground" title="Download as Markdown">
         <Download className="w-3 h-3" />.md
       </Button>
-      <Button variant="ghost" size="sm" onClick={copyNotion} className="text-xs gap-1.5 h-7 text-muted-foreground hover:text-foreground" title="Copy Notion-ready format">
+      {/* <Button variant="ghost" size="sm" onClick={copyNotion} className="text-xs gap-1.5 h-7 text-muted-foreground hover:text-foreground" title="Copy Notion-ready format">
         {copied === "notion" ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <FileText className="w-3 h-3" />}
         Notion
-      </Button>
+      </Button> */}
       <Button variant="ghost" size="sm" onClick={exportJSON} className="text-xs gap-1.5 h-7 text-muted-foreground hover:text-foreground" title="Download as JSON">
         <FileJson className="w-3 h-3" />.json
       </Button>
