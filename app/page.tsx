@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef } from "react";
-import { Zap, Loader2, BookOpenCheck, BarChart3, Database, LayoutGrid, FileUp } from "lucide-react";
+import { Zap, Loader2, BookOpenCheck, BarChart3, Database, LayoutGrid, FileUp, HelpCircle } from "lucide-react";
 
 import { normalizeNotes } from "@/lib/normalizer";
 import { MODES, type Mode, type Highlight, type OutputItem, type RunMetrics } from "@/lib/schema";
@@ -18,6 +18,7 @@ import { EvalDashboard } from "@/components/app/EvalDashboard";
 import { ComparisonView } from "@/components/app/ComparisonView";
 import { StrictnessToggle, type StrictnessLevel } from "@/components/app/StrictnessToggle";
 import { PdfViewer } from "@/components/app/PdfViewer";
+import { HelpGuide, useFirstVisit } from "@/components/app/HelpGuide";
 
 interface ResultData {
   mode: Mode;
@@ -47,6 +48,9 @@ export default function Home() {
   const [generateAll, setGenerateAll] = useState(false);
   const [showPdf, setShowPdf] = useState(false);
   const [activeCitation, setActiveCitation] = useState<string | null>(null);
+
+  // Help guide — auto-shows on first visit
+  const [showHelp, dismissHelp, reopenHelp] = useFirstVisit();
 
   const rawInputRef = useRef(rawInput);
   rawInputRef.current = rawInput;
@@ -81,7 +85,6 @@ export default function Home() {
     }
   };
 
-  // PDF text goes straight into notes
   const handlePdfText = useCallback((text: string) => {
     setRawInput(text);
     setHighlights(normalizeNotes(text));
@@ -129,10 +132,13 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Navbar */}
       <header className="sticky top-0 z-30 border-b border-border/40 bg-background/80 backdrop-blur-xl">
         <div className="max-w-[1440px] mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-primary/10 border-glow"><BookOpenCheck className="w-4 h-4 text-primary" /></div>
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-primary/10 border-glow">
+              <BookOpenCheck className="w-4 h-4 text-primary" />
+            </div>
             <span className="font-display text-xl tracking-tight text-foreground">BookNotes</span>
           </div>
           <div className="flex items-center gap-1">
@@ -144,16 +150,22 @@ export default function Home() {
             <Button variant="ghost" size="sm" onClick={() => setShowEval(true)} className="text-xs gap-1.5 text-muted-foreground hover:text-foreground">
               <BarChart3 className="w-3.5 h-3.5" /> Eval
             </Button>
+            <Button variant="ghost" size="icon" onClick={reopenHelp} className="text-muted-foreground hover:text-foreground" title="Help & Guide">
+              <HelpCircle className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       </header>
 
+      {/* Main */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-5">
         <div className={`grid gap-5 h-[calc(100vh-8rem)] ${showPdf ? "grid-cols-1 lg:grid-cols-3" : "grid-cols-1 lg:grid-cols-2"}`}>
           {/* Left: Input */}
           <div className="flex flex-col gap-3 min-h-0">
             <ApiStatus />
-            <div className="flex-1 min-h-0"><NotesPanel value={rawInput} onChange={handleNotesChange} highlightCount={highlights.length} /></div>
+            <div className="flex-1 min-h-0">
+              <NotesPanel value={rawInput} onChange={handleNotesChange} highlightCount={highlights.length} />
+            </div>
             <HighlightsDrawer highlights={highlights} />
             <NoteSetManager rawInput={rawInput} highlights={highlights} onLoad={handleLoadNoteSet} />
             <ModeSelector value={activeMode} onChange={(m) => { setActiveMode(m); if (allResults[m]) setResult(allResults[m]); }} completedModes={completedModes} />
@@ -190,6 +202,7 @@ export default function Home() {
         </div>
       </main>
 
+      {/* Footer */}
       <footer className="border-t border-border/30 py-3">
         <div className="max-w-[1440px] mx-auto px-6 flex items-center justify-between text-[11px] text-muted-foreground/50">
           <span>Next.js + Groq + HuggingFace + Zod</span>
@@ -197,8 +210,10 @@ export default function Home() {
         </div>
       </footer>
 
+      {/* Overlays */}
       <EvalDashboard open={showEval} onClose={() => setShowEval(false)} />
       <ComparisonView open={showComparison} onClose={() => setShowComparison(false)} results={allResults} highlights={highlights} />
+      <HelpGuide open={showHelp} onClose={dismissHelp} />
     </div>
   );
 }
